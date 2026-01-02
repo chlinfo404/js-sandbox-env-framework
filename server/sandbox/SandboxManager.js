@@ -193,16 +193,33 @@ export class SandboxManager {
             if (fs.existsSync(categoryPath)) {
                 let files = fs.readdirSync(categoryPath).filter(f => f.endsWith('.js'));
                 
-                // core 目录：确保 MonitorSystem.js 首先加载
+                // core 目录：确保 EnvMonitor.js 首先加载
                 if (category === 'core') {
-                    // MonitorSystem 必须第一个加载
-                    const monitorFile = files.find(f => f === 'MonitorSystem.js');
-                    if (monitorFile) {
-                        const result = await this.loadEnvFile(path.join(category, monitorFile));
-                        results.push(result);
+                    // EnvMonitor 必须第一个加载（是新的监控核心）
+                    const priorityFiles = ['EnvMonitor.js', 'MonitorSystem.js'];
+                    for (const pf of priorityFiles) {
+                        const monitorFile = files.find(f => f === pf);
+                        if (monitorFile) {
+                            const result = await this.loadEnvFile(path.join(category, monitorFile));
+                            results.push(result);
+                        }
                     }
-                    // 加载其他 core 文件（排除 _index.js 和已加载的 MonitorSystem.js）
-                    files = files.filter(f => f !== 'MonitorSystem.js' && f !== '_index.js');
+                    // 加载其他 core 文件（排除已加载的）
+                    files = files.filter(f => !priorityFiles.includes(f) && f !== '_index.js');
+                }
+                
+                // dom 目录：确保 document.js 在 elements.js 之前加载
+                if (category === 'dom') {
+                    const priorityOrder = ['event.js', 'document.js', 'elements.js'];
+                    // 按优先顺序加载
+                    for (const pf of priorityOrder) {
+                        if (files.includes(pf)) {
+                            const result = await this.loadEnvFile(path.join(category, pf));
+                            results.push(result);
+                        }
+                    }
+                    // 加载剩余的dom文件
+                    files = files.filter(f => !priorityOrder.includes(f) && f !== '_index.js');
                 }
                 
                 // ai-generated目录先加载_index.js

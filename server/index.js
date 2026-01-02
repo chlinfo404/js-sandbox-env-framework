@@ -20,6 +20,7 @@ import sandboxRouter from './routes/sandbox.js';
 import aiRouter from './routes/ai.js';
 import snapshotRouter, { setSandboxGetter } from './routes/snapshot.js';
 import logRouter from './routes/log.js';
+import mockRouter from './routes/mock.js';
 
 // 沙箱管理
 import { SandboxManager } from './sandbox/index.js';
@@ -43,6 +44,7 @@ app.use('/api/sandbox', sandboxRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/snapshot', snapshotRouter);
 app.use('/api/log', logRouter);
+app.use('/api/mock', mockRouter);
 
 // 全局沙箱实例
 let globalSandbox = null;
@@ -113,6 +115,15 @@ app.get('/api', (req, res) => {
                 'GET /api/log/list': '列出日志文件',
                 'POST /api/log/clear': '清除日志',
                 'GET /api/log/export': '导出所有日志'
+            },
+            mock: {
+                'GET /api/mock/rules': '获取所有Mock规则',
+                'POST /api/mock/rules': '添加Mock规则',
+                'DELETE /api/mock/rules/:id': '删除Mock规则',
+                'PATCH /api/mock/rules/:id': '更新Mock规则状态',
+                'GET /api/mock/presets': '获取预设模板',
+                'POST /api/mock/presets/:name/apply': '应用预设模板',
+                'GET /api/mock/inject-code': '生成注入代码'
             }
         }
     });
