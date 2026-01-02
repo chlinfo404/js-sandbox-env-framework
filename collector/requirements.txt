@@ -1,0 +1,3 @@
+# DrissionPage 环境采集器依赖
+
+DrissionPage>=4.0.0

@@ -1,0 +1,33 @@
+{
+  "name": "js-sandbox-env-framework",
+  "version": "1.0.0",
+  "description": "JS逆向沙箱化补环境框架 - 支持Proxy递归代理、环境注入、AI辅助补环境",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node test/test.js"
+  },
+  "keywords": [
+    "sandbox",
+    "browser-environment",
+    "js-reverse",
+    "isolated-vm",
+    "proxy"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "isolated-vm": "^4.7.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
