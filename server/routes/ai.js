@@ -18,6 +18,13 @@ const router = express.Router();
 // AI提供者实例
 let aiProvider = null;
 
+// 沙箱实例获取器（从 server/index.js 注入）
+let getSandboxInstance = null;
+
+export function setSandboxGetter(getter) {
+    getSandboxInstance = getter;
+}
+
 /**
  * 获取AI提供者实例
  */
@@ -142,10 +149,10 @@ router.post('/complete-batch', async (req, res) => {
 /**
  * 应用AI生成的代码
  * POST /ai/apply
- * Body: { historyId: '...', filename: 'navigator_webdriver.js' }
+ * Body: { historyId: '...', filename: 'navigator_webdriver.js', autoReload: true }
  */
 router.post('/apply', async (req, res) => {
-    const { historyId, filename, code } = req.body;
+    const { historyId, filename, code, autoReload = true } = req.body;
     
     let codeToApply = code;
     let property = 'unknown';
@@ -198,11 +205,29 @@ router.post('/apply', async (req, res) => {
             });
         }
 
+        // 自动重载 AI 生成的文件
+        let reloadResult = null;
+        if (autoReload && getSandboxInstance) {
+            try {
+                const sandbox = await getSandboxInstance();
+                reloadResult = await sandbox.reloadAIGeneratedFiles();
+            } catch (reloadError) {
+                console.error('[AI Apply] Failed to reload AI files:', reloadError);
+                // 不阻塞主流程，只记录错误
+                reloadResult = {
+                    success: false,
+                    error: reloadError.message
+                };
+            }
+        }
+
         res.json({
             success: true,
             message: 'Code applied successfully',
             filename: safeFilename,
-            path: `ai-generated/${safeFilename}`
+            path: `ai-generated/${safeFilename}`,
+            reloaded: autoReload,
+            reloadResult: reloadResult
         });
     } catch (error) {
         res.status(500).json({

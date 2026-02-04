@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initTabs();
     initCodeEditors();
+    setupFileRunner();
     
     // 初始加载数据
     loadSandboxStatus();
@@ -114,12 +115,191 @@ async function loadSandboxStatus() {
     try {
         const result = await api.sandbox.status();
         if (result.success) {
-            document.getElementById('sandbox-status').textContent = '沙箱就绪';
+            document.getElementById('sandbox-status').textContent = `沙箱就绪 (${result.data.type})`;
             document.querySelector('.status-indicator .dot').style.background = 'var(--success-color)';
+            
+            // 显示环境信息
+            if (result.data.environment) {
+                const envInfo = result.data.environment;
+                console.log('环境信息:', envInfo);
+            }
         }
     } catch (error) {
         document.getElementById('sandbox-status').textContent = '沙箱异常';
         document.querySelector('.status-indicator .dot').style.background = 'var(--danger-color)';
+    }
+}
+
+// ========== 文件选择运行 ==========
+function setupFileRunner() {
+    const fileInput = document.getElementById('file-input');
+    if (fileInput) {
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const code = e.target.result;
+                    document.getElementById('code-input').value = code;
+                    showToast(`已加载文件: ${file.name}`, 'success');
+                };
+                reader.readAsText(file);
+            }
+        });
+    }
+}
+
+// 查看环境信息
+async function viewEnvironmentInfo() {
+    try {
+        const result = await api.sandbox.getEnvironment();
+        if (result.success) {
+            openModal(
+                '沙箱环境信息',
+                `<pre style="background: var(--bg-color); padding: 16px; border-radius: 8px; overflow: auto; max-height: 500px;">${JSON.stringify(result.data, null, 2)}</pre>`
+            );
+        }
+    } catch (error) {
+        showToast(`获取环境信息失败: ${error.message}`, 'error');
+    }
+}
+
+// 查看访问日志
+async function viewAccessLogs() {
+    try {
+        const result = await api.sandbox.getLogs('access', 100);
+        if (result.success) {
+            const logs = result.data.access || [];
+            openModal(
+                '访问日志',
+                logs.length > 0 ? 
+                    `<div style="max-height: 500px; overflow: auto;">${logs.map(log => 
+                        `<div style="padding: 8px; border-bottom: 1px solid var(--border-color);">
+                            <strong>${log.path}</strong><br>
+                            <span style="color: var(--text-secondary);">值: ${log.value}</span><br>
+                            <span style="color: var(--text-secondary); font-size: 12px;">
+                                时间: ${new Date(log.timestamp).toLocaleString()}
+                            </span>
+                        </div>`
+                    ).join('')}</div>` :
+                    '<p style="text-align: center; color: var(--text-secondary);">暂无访问日志</p>'
+            );
+        }
+    } catch (error) {
+        showToast(`获取日志失败: ${error.message}`, 'error');
+    }
+}
+
+// 显示详细日志
+function showDetailedLogs() {
+    const logs = window.__lastExecutionLogs__;
+    
+    if (!logs) {
+        showToast('暂无日志数据', 'info');
+        return;
+    }
+    
+    const accessHtml = logs.access.map((log, i) => `
+        <div style="padding: 8px; border-bottom: 1px solid var(--border-color); font-size: 13px;">
+            <span style="color: var(--primary-color);">${i + 1}.</span>
+            <strong>${log.path}</strong>
+            <span style="color: var(--text-secondary);"> → ${log.type}</span>
+        </div>
+    `).join('');
+    
+    const callHtml = logs.call.length > 0 ? logs.call.map((log, i) => `
+        <div style="padding: 8px; border-bottom: 1px solid var(--border-color); font-size: 13px;">
+            <span style="color: var(--success-color);">${i + 1}.</span>
+            <strong>${log.path}</strong>
+            <span style="color: var(--text-secondary);"> (${log.argTypes?.join(', ') || ''})</span>
+        </div>
+    `).join('') : '<p style="text-align: center; color: var(--text-secondary); padding: 16px;">无方法调用</p>';
+    
+    openModal(
+        '详细执行日志',
+        `
+        <div style="max-height: 500px; overflow: auto;">
+            <h4 style="margin-top: 0;">📝 属性访问 (${logs.access.length})</h4>
+            ${accessHtml || '<p style="text-align: center; color: var(--text-secondary);">无访问记录</p>'}
+            
+            <h4 style="margin-top: 24px;">🔧 方法调用 (${logs.call.length})</h4>
+            ${callHtml}
+        </div>
+        `
+    );
+}
+
+// ========== 代码搜索 ==========
+async function searchCode() {
+    const keyword = document.getElementById('code-search').value.trim();
+    if (!keyword) {
+        showToast('请输入搜索关键词', 'warning');
+        return;
+    }
+    
+    try {
+        // 搜索所有环境文件
+        const result = await api.env.list();
+        if (!result.success) {
+            showToast('搜索失败', 'error');
+            return;
+        }
+        
+        const searchResults = [];
+        
+        // 递归搜索文件
+        async function searchInTree(items) {
+            for (const item of items) {
+                if (item.type === 'file') {
+                    const fileResult = await api.env.getFile(item.path);
+                    if (fileResult.success && fileResult.data.content.includes(keyword)) {
+                        // 找到匹配的行
+                        const lines = fileResult.data.content.split('\n');
+                        const matches = lines
+                            .map((line, index) => ({ line, lineNum: index + 1 }))
+                            .filter(({ line }) => line.includes(keyword));
+                        
+                        searchResults.push({
+                            file: item.path,
+                            matches: matches.slice(0, 3) // 只显示前3个匹配
+                        });
+                    }
+                } else if (item.children) {
+                    await searchInTree(item.children);
+                }
+            }
+        }
+        
+        await searchInTree(result.data);
+        
+        // 显示结果
+        const resultsDiv = document.getElementById('search-results');
+        const resultsList = document.getElementById('search-results-list');
+        
+        if (searchResults.length > 0) {
+            resultsList.innerHTML = searchResults.map(r => `
+                <div class="search-result-item" style="margin-bottom: 16px; padding: 12px; background: var(--bg-color); border-radius: 8px;">
+                    <div style="font-weight: bold; margin-bottom: 8px;">
+                        <i class="fas fa-file-code"></i> ${r.file}
+                    </div>
+                    ${r.matches.map(m => `
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-left: 20px;">
+                            <span style="color: var(--primary-color);">行${m.lineNum}:</span> ${m.line.trim().substring(0, 80)}
+                        </div>
+                    `).join('')}
+                    <button class="btn btn-sm btn-primary" onclick="loadEnvFile('${r.file}')" style="margin-top: 8px;">
+                        <i class="fas fa-eye"></i> 查看文件
+                    </button>
+                </div>
+            `).join('');
+            resultsDiv.style.display = 'block';
+            showToast(`找到 ${searchResults.length} 个文件包含 "${keyword}"`, 'success');
+        } else {
+            resultsDiv.style.display = 'none';
+            showToast(`未找到包含 "${keyword}" 的文件`, 'info');
+        }
+    } catch (error) {
+        showToast(`搜索失败: ${error.message}`, 'error');
     }
 }
 
@@ -163,10 +343,54 @@ async function executeCode() {
         }
         
         // 显示console输出
-        if (result.logs && result.logs.access) {
-            const consoleOutput = document.getElementById('console-output');
-            const consoleLogs = result.logs.access.filter(l => l.path.startsWith('console'));
-            consoleOutput.textContent = consoleLogs.map(l => `[${l.type}] ${l.path}: ${l.value}`).join('\n') || '(无控制台输出)';
+        const consoleOutput = document.getElementById('console-output');
+        if (result.consoleOutput && result.consoleOutput.length > 0) {
+            consoleOutput.textContent = result.consoleOutput
+                .map(([type, ...args]) => `[${type}] ${args.join(' ')}`)
+                .join('\n');
+        } else {
+            consoleOutput.textContent = '(无控制台输出)';
+        }
+        
+        // 显示执行统计
+        if (result.stats) {
+            console.log('📊 执行统计:', result.stats);
+        }
+        
+        // 显示访问日志到界面
+        if (result.accessLogs && result.accessLogs.length > 0) {
+            console.log('📝 属性访问日志 (' + result.accessLogs.length + ' 条):', result.accessLogs);
+            
+            // 在结果面板显示统计
+            const statsHtml = `
+                <div style="margin-top: 16px; padding: 12px; background: var(--bg-color); border-radius: 8px;">
+                    <strong>📊 日志统计:</strong><br>
+                    属性访问: ${result.stats.accessCount} 次 | 
+                    方法调用: ${result.stats.callCount} 次 | 
+                    控制台: ${result.stats.consoleCount} 条
+                    <br>
+                    <button class="btn btn-sm btn-primary" onclick="showDetailedLogs()" style="margin-top: 8px;">
+                        <i class="fas fa-list"></i> 查看详细日志
+                    </button>
+                </div>
+            `;
+            
+            const execResult = document.getElementById('exec-result');
+            if (execResult.nextElementSibling) {
+                execResult.nextElementSibling.remove();
+            }
+            execResult.insertAdjacentHTML('afterend', statsHtml);
+            
+            // 保存日志数据供查看
+            window.__lastExecutionLogs__ = {
+                access: result.accessLogs,
+                call: result.callLogs
+            };
+        }
+        
+        // 显示调用日志
+        if (result.callLogs && result.callLogs.length > 0) {
+            console.log('🔧 方法调用日志 (' + result.callLogs.length + ' 条):', result.callLogs);
         }
         
         // 更新undefined计数
@@ -364,9 +588,48 @@ async function autoCompleteAll() {
     try {
         const result = await api.ai.completeBatch(properties);
         if (result.success) {
-            showToast(`批量补充完成: ${result.successful}/${result.total} 成功`, 'success');
+            showToast(`批量生成完成: ${result.successful}/${result.total} 成功`, 'success');
+            
+            // 询问是否立即应用所有生成的代码
+            if (result.successful > 0 && confirm(`成功生成 ${result.successful} 个补充代码，是否立即应用？`)) {
+                showToast('正在批量应用代码...', 'info');
+                
+                let appliedCount = 0;
+                let failedCount = 0;
+                
+                // 逐个应用成功生成的代码
+                for (const item of result.results) {
+                    if (item.success && item.historyId) {
+                        try {
+                            const applyResult = await api.ai.apply(item.historyId, null, false);
+                            if (applyResult.success) {
+                                appliedCount++;
+                            } else {
+                                failedCount++;
+                            }
+                        } catch (e) {
+                            failedCount++;
+                        }
+                    }
+                }
+                
+                // 应用完成后统一重载
+                if (appliedCount > 0) {
+                    try {
+                        await api.sandbox.reloadAI();
+                        showToast(`批量应用完成: ${appliedCount} 成功, ${failedCount} 失败 (已重载)`, 'success');
+                    } catch (e) {
+                        showToast(`批量应用完成: ${appliedCount} 成功, ${failedCount} 失败 (重载失败)`, 'warning');
+                    }
+                } else {
+                    showToast(`批量应用失败`, 'error');
+                }
+            }
+            
             refreshUndefinedList();
             loadAIHistory();
+        } else {
+            showToast(`批量补充失败: ${result.error}`, 'error');
         }
     } catch (error) {
         showToast(`批量补充失败: ${error.message}`, 'error');
@@ -458,15 +721,36 @@ async function applyGeneratedCode() {
     }
     
     try {
-        const result = await api.ai.apply(currentAIResult.historyId);
+        showToast('正在应用 AI 代码...', 'info');
+        
+        const result = await api.ai.apply(currentAIResult.historyId, null, true);
+        
         if (result.success) {
-            showToast(`代码已应用: ${result.filename}`, 'success');
+            // 显示应用成功消息
+            let message = `代码已应用: ${result.filename}`;
+            
+            // 如果自动重载成功，显示重载信息
+            if (result.reloaded && result.reloadResult) {
+                if (result.reloadResult.success) {
+                    message += ` (已自动重载)`;
+                } else {
+                    message += ` (重载失败: ${result.reloadResult.error})`;
+                }
+            }
+            
+            showToast(message, 'success');
+            
+            // 刷新相关界面
             loadAIHistory();
             refreshEnvTree();
+            refreshUndefinedList();
             
-            // 重置当前结果
+            // 清空当前结果
+            document.getElementById('ai-result-code').value = '';
+            document.getElementById('ai-result-info').textContent = '';
             currentAIResult = null;
             document.getElementById('apply-ai-btn').disabled = true;
+            document.getElementById('copy-ai-btn').disabled = true;
         } else {
             showToast(`应用失败: ${result.error}`, 'error');
         }
@@ -524,12 +808,30 @@ async function viewHistory(id) {
 
 async function applyFromHistory(id) {
     try {
-        const result = await api.ai.apply(id);
+        showToast('正在应用 AI 代码...', 'info');
+        
+        const result = await api.ai.apply(id, null, true);
+        
         if (result.success) {
-            showToast(`代码已应用: ${result.filename}`, 'success');
+            // 显示应用成功消息
+            let message = `代码已应用: ${result.filename}`;
+            
+            // 如果自动重载成功，显示重载信息
+            if (result.reloaded && result.reloadResult) {
+                if (result.reloadResult.success) {
+                    message += ` (已自动重载)`;
+                } else {
+                    message += ` (重载失败: ${result.reloadResult.error})`;
+                }
+            }
+            
+            showToast(message, 'success');
             closeModal();
             loadAIHistory();
             refreshEnvTree();
+            refreshUndefinedList();
+        } else {
+            showToast(`应用失败: ${result.error}`, 'error');
         }
     } catch (error) {
         showToast(`应用失败: ${error.message}`, 'error');

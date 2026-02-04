@@ -17,13 +17,13 @@ import { fileURLToPath } from 'url';
 // 路由
 import envRouter from './routes/env.js';
 import sandboxRouter from './routes/sandbox.js';
-import aiRouter from './routes/ai.js';
+import aiRouter, { setSandboxGetter as setAISandboxGetter } from './routes/ai.js';
 import snapshotRouter, { setSandboxGetter } from './routes/snapshot.js';
 import logRouter from './routes/log.js';
 import mockRouter from './routes/mock.js';
 
 // 沙箱管理
-import { SandboxManager } from './sandbox/index.js';
+import { SimpleSandbox } from './sandbox/SimpleSandbox.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -51,15 +51,15 @@ let globalSandbox = null;
 
 async function getGlobalSandbox() {
     if (!globalSandbox) {
-        globalSandbox = new SandboxManager();
-        await globalSandbox.init();
-        await globalSandbox.loadAllEnvFiles();
+        globalSandbox = new SimpleSandbox();
+        globalSandbox.init();
     }
     return globalSandbox;
 }
 
-// 设置沙箱获取器给快照路由使用
+// 设置沙箱获取器给快照路由和 AI 路由使用
 setSandboxGetter(getGlobalSandbox);
+setAISandboxGetter(getGlobalSandbox);
 
 // 健康检查
 app.get('/api/health', (req, res) => {

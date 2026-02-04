@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { SandboxManager } from '../sandbox/index.js';
+import { SimpleSandbox } from '../sandbox/SimpleSandbox.js';
 
 const router = express.Router();
 
@@ -11,14 +11,12 @@ const router = express.Router();
 let sandboxInstance = null;
 
 /**
- * 获取沙箱实例
+ * 获取沙箱实例 - 使用简化版本
  */
 async function getSandbox() {
     if (!sandboxInstance) {
-        sandboxInstance = new SandboxManager();
-        await sandboxInstance.init();
-        // 自动加载所有环境文件
-        await sandboxInstance.loadAllEnvFiles();
+        sandboxInstance = new SimpleSandbox();
+        sandboxInstance.init();
     }
     return sandboxInstance;
 }
@@ -55,8 +53,15 @@ router.post('/run', async (req, res) => {
             error: result.error,
             stack: result.stack,
             duration: result.duration,
-            undefinedPaths: result.undefinedPaths,
-            stats: sandbox.getStats()
+            undefinedPaths: result.undefinedPaths || [],
+            consoleOutput: result.consoleOutput || [],
+            accessLogs: result.accessLogs || [],
+            callLogs: result.callLogs || [],
+            stats: {
+                accessCount: result.accessLogs?.length || 0,
+                callCount: result.callLogs?.length || 0,
+                consoleCount: result.consoleOutput?.length || 0
+            }
         });
     } catch (error) {
         res.status(500).json({
@@ -165,16 +170,68 @@ router.post('/reset', async (req, res) => {
 router.get('/status', async (req, res) => {
     try {
         const sandbox = await getSandbox();
-        const stats = sandbox.getStats();
-        const logger = sandbox.getLogger();
+        const envInfo = sandbox.getEnvironmentInfo ? sandbox.getEnvironmentInfo() : {};
         
         res.json({
             success: true,
             data: {
-                stats,
-                loggerStats: logger.getStats()
+                ready: !!sandbox.context,
+                type: 'SimpleSandbox (Node.js VM)',
+                stats: sandbox.getStats ? sandbox.getStats() : {},
+                environment: envInfo
             }
         });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+/**
+ * 获取环境信息
+ * GET /sandbox/environment
+ */
+router.get('/environment', async (req, res) => {
+    try {
+        const sandbox = await getSandbox();
+        const envInfo = sandbox.getEnvironmentInfo ? sandbox.getEnvironmentInfo() : {};
+        
+        res.json({
+            success: true,
+            data: envInfo
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+/**
+ * 执行文件
+ * POST /sandbox/run-file
+ * Body: { filePath: 'path/to/file.js' }
+ */
+router.post('/run-file', async (req, res) => {
+    const { filePath } = req.body;
+    
+    if (!filePath) {
+        return res.status(400).json({
+            success: false,
+            error: 'Missing filePath parameter'
+        });
+    }
+    
+    try {
+        const sandbox = await getSandbox();
+        const result = sandbox.executeFile ? 
+            sandbox.executeFile(filePath) : 
+            { success: false, error: 'executeFile not supported' };
+        
+        res.json(result);
     } catch (error) {
         res.status(500).json({
             success: false,
@@ -190,8 +247,7 @@ router.get('/status', async (req, res) => {
 router.get('/undefined', async (req, res) => {
     try {
         const sandbox = await getSandbox();
-        const logger = sandbox.getLogger();
-        const undefinedList = logger.getUndefinedList();
+        const undefinedList = sandbox.getUndefinedList ? sandbox.getUndefinedList() : [];
         
         res.json({
             success: true,
@@ -215,8 +271,8 @@ router.get('/logs', async (req, res) => {
     
     try {
         const sandbox = await getSandbox();
-        const logger = sandbox.getLogger();
-        let logs = logger.getAllLogs();
+        const logger = sandbox.getLogger ? sandbox.getLogger() : null;
+        let logs = logger ? logger.getAllLogs() : { access: [], undefined: [], calls: [] };
         
         if (type) {
             logs = {
@@ -250,12 +306,38 @@ router.get('/logs', async (req, res) => {
 router.post('/logs/clear', async (req, res) => {
     try {
         const sandbox = await getSandbox();
-        const logger = sandbox.getLogger();
-        logger.clear();
+        const logger = sandbox.getLogger ? sandbox.getLogger() : null;
+        if (logger && logger.clear) {
+            logger.clear();
+        }
         
         res.json({
             success: true,
             message: 'Logs cleared'
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+/**
+ * 注入环境数据
+ * POST /sandbox/inject-env
+ * Body: { code: '...', data: {...} }
+ */
+router.post('/inject-env', async (req, res) => {
+    const { code, data } = req.body;
+    
+    try {
+        const sandbox = await getSandbox();
+        const result = sandbox.injectEnvironment(code || data);
+        
+        res.json({
+            success: result.success,
+            error: result.error
         });
     } catch (error) {
         res.status(500).json({

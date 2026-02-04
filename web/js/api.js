@@ -92,6 +92,27 @@ const api = {
                 method: 'POST'
             });
             return res.json();
+        },
+        
+        async reloadAI() {
+            const res = await fetch(`${API_BASE}/sandbox/reload-ai`, {
+                method: 'POST'
+            });
+            return res.json();
+        },
+        
+        async getEnvironment() {
+            const res = await fetch(`${API_BASE}/sandbox/environment`);
+            return res.json();
+        },
+        
+        async runFile(filePath) {
+            const res = await fetch(`${API_BASE}/sandbox/run-file`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filePath })
+            });
+            return res.json();
         }
     },
     
